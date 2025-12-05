@@ -34,11 +34,12 @@
         } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
         // ==========================================
-        //  CONFIGURACIÓN (¡EDITA ESTO!)
+        //  CONFIGURACIÓN CORREGIDA
         // ==========================================
         
-        // --- PEGA AQUÍ LO QUE COPIASTE DE FIREBASE ---
-        // (Reemplaza todo este bloque const firebaseConfig = { ... } con el tuyo)
+        // Aquí estaba el error. He restaurado la línea "const firebaseConfig = {"
+        // y he puesto tus claves dentro correctamente.
+        const firebaseConfig = {
           apiKey: "AIzaSyAKge21Uy94wXdsygmqf9kbrxlaZm3H-r4",
           authDomain: "cuarenta-5af3b.firebaseapp.com",
           projectId: "cuarenta-5af3b",
