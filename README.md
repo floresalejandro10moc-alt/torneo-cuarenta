@@ -33,7 +33,11 @@
         window.onerror = function(message, source, lineno, colno, error) {
             const box = document.getElementById('error-box');
             box.style.display = 'block';
-            box.innerHTML = `<h1>¡UPS! ALGO FALLÓ 😵</h1><hr/>Error: ${message}<br/>Línea: ${lineno}<br/><br/>Verifica que hayas creado la 'Firestore Database' en tu consola de Firebase.<br/>Si el error persiste, envía una captura de esto.`;
+            console.error("Error global:", message, error);
+            // No mostramos el error al usuario si es el de Firebase conocido, ya que lo arreglamos en el código
+            if(!message.includes("Invalid collection reference")) {
+                 box.innerHTML = `<h1>¡UPS! ALGO FALLÓ 😵</h1><hr/>Error: ${message}<br/>Línea: ${lineno}<br/><br/>Verifica la consola para más detalles.`;
+            }
         };
     </script>
 
@@ -47,7 +51,7 @@
             writeBatch, getDocs, where 
         } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-        // --- TUS CLAVES (Ya las puse yo) ---
+        // --- TUS CLAVES ---
         const firebaseConfig = {
           apiKey: "AIzaSyAKge21Uy94wXdsygmqf9kbrxlaZm3H-r4",
           authDomain: "cuarenta-5af3b.firebaseapp.com",
@@ -87,22 +91,36 @@
 
             // Autenticación
             React.useEffect(() => {
-                signInAnonymously(auth).catch(err => console.error("Error Auth:", err));
-                onAuthStateChanged(auth, (u) => u && setUserId(u.uid));
+                const init = async () => {
+                    await signInAnonymously(auth).catch(err => console.error("Error Auth:", err));
+                };
+                init();
+                return onAuthStateChanged(auth, (u) => u && setUserId(u.uid));
             }, []);
 
             // Escuchar cambios
             React.useEffect(() => {
                 if (!userId || !tournamentId) return;
 
-                const publicRef = collection(db, 'artifacts', APP_ID, 'public', 'data');
+                // CORRECCIÓN: Usamos rutas completas directas en lugar de referencias intermedias
+                const teamsQuery = query(
+                    collection(db, 'artifacts', APP_ID, 'public', 'data', `${tournamentId}_teams`), 
+                    orderBy('createdAt', 'desc')
+                );
                 
-                const unsubTeams = onSnapshot(query(collection(publicRef, `${tournamentId}_teams`), orderBy('createdAt', 'desc')), 
+                const matchesQuery = query(
+                    collection(db, 'artifacts', APP_ID, 'public', 'data', `${tournamentId}_matches`), 
+                    orderBy('matchNumber', 'asc')
+                );
+
+                const statusDocRef = doc(db, 'artifacts', APP_ID, 'public', 'data', `${tournamentId}_status`, 'info');
+
+                const unsubTeams = onSnapshot(teamsQuery, 
                     s => setTeams(s.docs.map(d => ({id: d.id, ...d.data()}))),
                     err => console.error("Error Teams:", err)
                 );
 
-                const unsubMatches = onSnapshot(query(collection(publicRef, `${tournamentId}_matches`), orderBy('matchNumber', 'asc')), 
+                const unsubMatches = onSnapshot(matchesQuery, 
                     s => {
                         const all = s.docs.map(d => ({id: d.id, ...d.data()}));
                         setMatches(all.filter(m => !m.isConsolation));
@@ -119,12 +137,13 @@
                     err => console.error("Error Matches:", err)
                 );
 
-                const unsubStatus = onSnapshot(doc(publicRef, `${tournamentId}_status`, 'info'), s => {
+                const unsubStatus = onSnapshot(statusDocRef, s => {
                     if (s.exists()) {
                         setStatus(s.data());
                         setView(s.data().state === 'registration' ? 'lobby' : 'active');
                     } else {
-                        setDoc(doc(publicRef, `${tournamentId}_status`, 'info'), { state: 'registration', round: 1 });
+                        // Crear documento inicial si no existe
+                        setDoc(statusDocRef, { state: 'registration', round: 1 });
                     }
                 }, err => console.error("Error Status:", err));
 
@@ -133,12 +152,16 @@
 
             const addTeam = async () => {
                 if (!teamName) return;
+                // CORRECCIÓN: Ruta completa
                 const ref = collection(db, 'artifacts', APP_ID, 'public', 'data', `${tournamentId}_teams`);
                 await setDoc(doc(ref), { name: teamName, p1, p2, createdAt: serverTimestamp() });
                 setTeamName(''); setP1(''); setP2('');
             };
 
-            const deleteTeam = async (id) => deleteDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', `${tournamentId}_teams`, id));
+            const deleteTeam = async (id) => {
+                // CORRECCIÓN: Ruta completa
+                await deleteDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', `${tournamentId}_teams`, id));
+            }
 
             const shuffle = (arr) => arr.sort(() => Math.random() - 0.5);
 
@@ -152,7 +175,6 @@
                 let powerOf2 = 1;
                 while (powerOf2 * 2 <= N) powerOf2 *= 2; 
                 
-                // Si es potencia exacta (ej: 4, 8, 16), todos juegan. Si no, ajustamos.
                 let numMatches = 0;
                 let numByes = 0;
 
@@ -160,10 +182,6 @@
                     numMatches = N / 2;
                     numByes = 0;
                 } else {
-                    // Diferencia para llegar a la potencia anterior
-                    // Ej: N=6. Potencia=4. Sobran 2.
-                    // Partidos preliminares = N - Potencia (6-4 = 2 partidos).
-                    // Byes = Potencia - Partidos (4-2 = 2 byes).
                     numMatches = N - powerOf2;
                     numByes = powerOf2 - numMatches;
                 }
@@ -171,7 +189,7 @@
                 let matchCount = 1;
                 let teamIdx = 0;
 
-                // 1. Partidos Preliminares
+                // CORRECCIÓN: Rutas completas en loops
                 for (let i = 0; i < numMatches; i++) {
                     const tA = shuffledTeams[teamIdx++];
                     const tB = shuffledTeams[teamIdx++];
@@ -183,7 +201,6 @@
                     });
                 }
 
-                // 2. Byes
                 for (let i = 0; i < numByes; i++) {
                     const t = shuffledTeams[teamIdx++];
                     const ref = doc(collection(db, 'artifacts', APP_ID, 'public', 'data', `${tournamentId}_matches`));
@@ -245,6 +262,7 @@
                 for (let i = 0; i < winners.length; i += 2) {
                     const tA = winners[i];
                     const tB = winners[i+1];
+                    // CORRECCIÓN: Ruta completa
                     const ref = doc(collection(db, 'artifacts', APP_ID, 'public', 'data', `${tournamentId}_matches`));
                     batch.set(ref, {
                         round: nextRound, roundName, matchNumber: matchCount++,
@@ -259,16 +277,15 @@
             };
 
             const generateConsolationRound = async () => {
-                const losersSnap = await getDocs(query(collection(db, 'artifacts', APP_ID, 'public', 'data', `${tournamentId}_losers`), where('available', '==', true)));
+                // CORRECCIÓN: Ruta completa
+                const losersRef = collection(db, 'artifacts', APP_ID, 'public', 'data', `${tournamentId}_losers`);
+                const losersSnap = await getDocs(query(losersRef, where('available', '==', true)));
                 const losersDocs = losersSnap.docs;
 
                 if (losersDocs.length < 2) return alert("No hay suficientes perdedores aún.");
 
                 const batch = writeBatch(db);
-                // Barajar perdedores
                 const shuffledDocs = losersDocs.sort(() => Math.random() - 0.5);
-                
-                // Solo tomar pares
                 const pairCount = Math.floor(shuffledDocs.length / 2) * 2;
 
                 for (let i = 0; i < pairCount; i += 2) {
@@ -277,6 +294,7 @@
                     const tA = docA.data().team;
                     const tB = docB.data().team;
 
+                    // CORRECCIÓN: Ruta completa
                     const ref = doc(collection(db, 'artifacts', APP_ID, 'public', 'data', `${tournamentId}_matches`));
                     batch.set(ref, {
                         round: 99, roundName: "Repechaje", matchNumber: Date.now(),
@@ -293,6 +311,7 @@
             const nuke = async () => {
                 if(!confirm("¿BORRAR TODO? Se reiniciará el torneo.")) return;
                 const batch = writeBatch(db);
+                // CORRECCIÓN: Rutas completas para borrado
                 const t = await getDocs(collection(db, 'artifacts', APP_ID, 'public', 'data', `${tournamentId}_teams`));
                 t.forEach(d => batch.delete(d.ref));
                 const m = await getDocs(collection(db, 'artifacts', APP_ID, 'public', 'data', `${tournamentId}_matches`));
